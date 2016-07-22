@@ -2,6 +2,9 @@
 
 set -o nounset
 
+echo "Stopping history server" >&2
+"${HADOOP_PREFIX}/sbin/mr-jobhistory-daemon.sh" stop historyserver
+
 echo "stopping Yarn..." >&2
 "${HADOOP_PREFIX}/sbin/stop-yarn.sh"
 

@@ -24,3 +24,4 @@ hdfs namenode -format
 hdfs dfs -mkdir /user/ /user/$(whoami) /data
 
 "${HADOOP_PREFIX}/sbin/start-yarn.sh"
+"${HADOOP_PREFIX}/sbin/mr-jobhistory-daemon.sh" start historyserver
