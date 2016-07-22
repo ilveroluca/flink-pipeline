@@ -19,7 +19,7 @@ cd "${CodePath}"
 # dependencies
 log "Installing packaged dependencies with apt-get"
 #sudo apt-get update
-sudo apt-get install libpython2.7-dev
+sudo apt-get install libpython2.7-dev swig3.0
 
 
 # install SBT
@@ -48,6 +48,15 @@ rm -rf "${CodePath}/pydoop"
 git clone https://github.com/crs4/pydoop.git
 cd pydoop
 python setup.py build
+python setup.py install --prefix "${InstallPath}"
+
+cd "${CodePath}"
+
+log "Installing RAPI to ${InstallPath}"
+git clone https://github.com/crs4/rapi.git
+cd rapi
+make
+cd pyrapi
 python setup.py install --prefix "${InstallPath}"
 
 cd "${CodePath}"
