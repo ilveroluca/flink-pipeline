@@ -19,7 +19,7 @@ cd "${CodePath}"
 # dependencies
 log "Installing packaged dependencies with apt-get"
 #sudo apt-get update
-sudo apt-get install libpython2.7-dev swig3.0
+sudo apt-get install libpython2.7-dev python-pytest swig3.0
 
 
 # install SBT
@@ -37,10 +37,24 @@ if ! type -P sbt ; then
 	fi
 fi
 
+
 # install our programs
 
 # Python setuptools won't create the installation directory if it doesn't exist
 mkdir -p "${PythonInstallPath}"
+
+
+log "Installing Pyavroc to ${InstallPath}"
+log "Removing ${CodePath}/pyavroc, if it exists"
+rm -rf "${CodePath}/pyavroc"
+git clone https://github.com/Byhiras/pyavroc.git
+cd pyavroc
+./clone_avro_and_build.sh
+python setup.py install --prefix "${InstallPath}"
+
+
+cd "${CodePath}"
+
 
 log "Installing Pydoop to ${InstallPath}"
 log "Removing ${CodePath}/pydoop, if it exists"
