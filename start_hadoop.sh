@@ -21,6 +21,6 @@ rm -rf "${HADOOP_PREFIX}/logs/hadoop*" "${HADOOP_PREFIX}/logs/yarn*" "${HADOOP_P
 
 hdfs namenode -format
 "${HADOOP_PREFIX}/sbin/start-dfs.sh"
-hdfs fs -mkdir /user/ /user/$(whoami) /data
+hdfs dfs -mkdir /user/ /user/$(whoami) /data
 
 "${HADOOP_PREFIX}/sbin/start-yarn.sh"
