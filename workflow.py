@@ -202,6 +202,11 @@ def _run_converter(input_dir, output_dir, n_nodes, jar_path):
         # now run the program
         logger.debug("Running flink cwd %s", run_dir)
         cmd = [ _get_exec("flink"), "run",
+                "-m", "yarn-cluster",
+                 '-yn',  n_nodes,
+                 '-yjm', GlobalConf['job_manager_mem'], # job manager memory
+                 '-ytm', GlobalConf['task_manager_mem'], # task manager memory
+                 '-ys',  GlobalConf['slots'],
                 "-c", "bclconverter.bclreader.test", # class name
                 jar_path ]
         logger.debug("executing command: %s", cmd)
@@ -214,7 +219,7 @@ def _run_converter(input_dir, output_dir, n_nodes, jar_path):
     finally:
         logger.debug("Removing run directory %s", run_dir)
         try:
-            pass #shutil.rmtree(run_dir)
+            shutil.rmtree(run_dir)
         except IOError as e:
             logger.debug("Error cleaning up temporary dir %s", run_dir)
             logger.debug(e.message)
@@ -245,14 +250,8 @@ def run_bcl_converter(input_dir, output_dir, n_nodes, jar_path):
     if n_nodes < 1:
         raise ValueError("n_nodes must be >= 1 (got {})".format(n_nodes))
 
-    logger.info("Starting flink session on Yarn")
-    popen_yarn = _start_flink_yarn_session(n_nodes)
-    try:
-        logger.info("Launched flink session on Yarn; PID: %d", popen_yarn.pid)
-        logger.info("Running flink bcl converter")
-        _run_converter(input_dir, output_dir, n_nodes, jar_path)
-    finally:
-        _kill_flink_yarn_session(popen_yarn)
+    logger.info("Running flink bcl converter")
+    _run_converter(input_dir, output_dir, n_nodes, jar_path)
 
 
 def _get_samples_from_bcl_output(output_dir):
@@ -305,6 +304,11 @@ def run_alignments(bcl_output_dir, output_dir):
 
     jobs = [ start_job(s) for s in sample_directories ]
     _wait(jobs)
+    errored_jobs = [ j for j in jobs if j.retcode != 0 ]
+    if errored_jobs:
+        logger.error("%d alignment jobs failed", len(errored_jobs))
+        logger.error("Here are the return codes: %s", ', '.join([ str(j.retcode) for j in errored_jobs]))
+        raise RuntimeError("Some alignment jobs failed")
 
 
 def main(args):
