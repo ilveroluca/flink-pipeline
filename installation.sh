@@ -7,6 +7,18 @@ function log() {
 set -o errexit
 set -o nounset
 
+max_locked_ram=$(ulimit -l)
+if [[ "${max_locked_ram}" != "unlimited" && ${max_locked_ram} -lt $((5 * 1024*1024*1024)) ]] ; then
+	echo "Locked memory limit of ${max_locked_ram} is probably too low." >&2
+	echo "Increase it by editing /etc/security/limits.conf." >&2
+	echo "Check the value currently in effect with ulimits -l" >&2
+	echo
+	echo "Oh!  And don't forget to check the other nodes!" >&2
+	exit 1
+fi
+
+
+
 log "Installing stuff"
 
 CodePath="${HOME}/code"
