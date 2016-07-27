@@ -34,5 +34,7 @@ chown admin.admin /data/data0{1,2}/tmp
 # The master node only, needs to mount the data directory 
 # if [[ "${HOSTNAME}" == "master" ]]; then ... how do we know whether we're running on the master?
 
+printf "=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=\n" >&2
 printf "If you're on the master node, mount the input data drive.\n" >&2
 printf "Copy & paster this command:   mount -o ro /dev/xvdp /dataset\n" >&2
+printf "=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=\n" >&2
