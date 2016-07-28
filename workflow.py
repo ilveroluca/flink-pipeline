@@ -146,6 +146,7 @@ class AlignJob(object):
     def popen_obj(self, v):
         self._popen = v
 
+    @property
     def done(self):
         if self._retcode is None:
             self._retcode = self._popen.poll()
