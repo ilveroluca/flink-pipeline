@@ -55,6 +55,7 @@ def make_parser():
     parser.add_argument('output', help="output path")
     parser.add_argument('--n-nodes', type=int, help="number of nodes in the cluster", default=1)
     parser.add_argument('--converter-path', help="bclconverter directory", default='.')
+    parser.add_argument('--keep-intermediate', help="Don't delete intermediate data", action='store_true')
     parser.add_argument('--log-level', choices=('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'),
             help="Logging level", default='INFO')
     return parser
@@ -332,12 +333,14 @@ def main(args):
         run_bcl_converter(options.input, tmp_output_dir, options.n_nodes, options.jar_path)
         run_alignments(tmp_output_dir, options.output)
     finally:
-        try:
-            phdfs.rmr(tmp_output_dir)
-        except StandardError as e:
-            logger.error("Error while trying to remove temporary output directory {}".format(e))
-            logger.exception(e)
-
+        if options.keep_intermediate:
+            logger.info("Leaving intermediate data in directory %s", tmp_output_dir)
+        else:
+            try:
+                phdfs.rmr(tmp_output_dir)
+            except StandardError as e:
+                logger.error("Error while trying to remove temporary output directory {}".format(e))
+                logger.exception(e)
 
 if __name__ == '__main__':
     main(sys.argv[1:])
