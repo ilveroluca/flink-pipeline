@@ -317,6 +317,7 @@ def run_alignments(bcl_output_dir, output_dir):
 
 
 def main(args):
+    start_time = time.time()
     logger.setLevel(logging.DEBUG)
 
     options = parse_args(args)
@@ -331,7 +332,9 @@ def main(args):
     logger.debug("Temporary output directory on HDFS: %s", tmp_output_dir)
     try:
         run_bcl_converter(options.input, tmp_output_dir, options.n_nodes, options.jar_path)
+        time_after_bcl = time.time()
         run_alignments(tmp_output_dir, options.output)
+        time_after_align = time.time()
     finally:
         if options.keep_intermediate:
             logger.info("Leaving intermediate data in directory %s", tmp_output_dir)
@@ -341,6 +344,11 @@ def main(args):
             except StandardError as e:
                 logger.error("Error while trying to remove temporary output directory {}".format(e))
                 logger.exception(e)
+
+    finish_time = time.time()
+    logger.info("Seconds for bcl conversion:  %0.2f", (time_after_bcl - start_time))
+    logger.info("Seconds for alignment:  %0.2f", (time_after_align - time_after_bcl))
+    logger.info("Total execution time:  %0.2f", (finish_time - start_time))
 
 if __name__ == '__main__':
     main(sys.argv[1:])
