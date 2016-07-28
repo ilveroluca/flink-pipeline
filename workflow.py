@@ -69,6 +69,9 @@ def parse_args(args):
     if options.n_nodes <= 0:
         p.error("--n-nodes must be >= 1")
 
+    if phdfs.path.exists(options.output):
+        p.error("Output path {} already exists".format(options.output))
+
     # check bcl converter path
     if not options.converter_path:
         p.error("--converter-path cannot be an empty argument")
