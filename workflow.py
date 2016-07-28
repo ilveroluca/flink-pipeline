@@ -15,7 +15,8 @@ from contextlib import contextmanager
 
 import pydoop.hdfs as phdfs
 
-logging.basicConfig()
+logformat = '%(asctime)s\t%(levelname)s\tWORKFLOW\t%(message)s'
+logging.basicConfig(format=logformat)
 logger = logging.getLogger()
 
 GlobalConf = {
