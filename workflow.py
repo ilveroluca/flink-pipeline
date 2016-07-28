@@ -27,6 +27,7 @@ GlobalConf = {
         'flinkpar'         : 1,
         'jnum'             : 2,
         'tasksPerNode'     : 16,
+        'session_wait'     : 45,
         'seqal_nthreads'   : 15,
         'reference_archive': 'hs37d5.fasta.tar',
         'seqal_input_fmt'  : 'prq',
@@ -119,6 +120,9 @@ def verify_conf(parser):
     if GlobalConf['task_manager_mem'] <= 1000:
         parser.error("task_manager_mem of {:d} is too low".format(GlobalConf['task_manager_mem']))
 
+    if GlobalConf.get('session_wait', 0) < 0:
+        parser.error("session_wait, if present, must be >= 0 (found {})".format(GlobalConf['session_wait']))
+
     # test whether we can find the executables  we need to run
     for e in ('yarn-session.sh', 'flink', 'seal'):
         _get_exec(e)
@@ -162,28 +166,126 @@ class AlignJob(object):
         else:
             return None
 
+def _parse_session_output(text):
+    regex = re.compile(r'\s*yarn application -kill (application_\d+_\d+)\s*')
+    for line in text.split('\n'):
+        if line.startswith('yarn application -kill application_'):
+            m = regex.match(line)
+            if m:
+                return m.group(1)
+    logger.debug("Unable to extract app id from output of yarn-session.sh")
+    logger.debug("here's the output:\n%s", text)
+    raise RuntimeError("Unable to extract Yarn application id from output of yarn-session.sh")
+
+def _get_app_status(app_id):
+    valid_states = set([
+        'ALL', 'NEW', 'NEW_SAVING', 'SUBMITTED',
+        'ACCEPTED', 'RUNNING', 'FINISHED', 'FAILED', 'KILLED', 'UNDEFINED' ])
+    cmd = [ 'yarn', 'application', '-status', app_id ]
+    output = subprocess.check_output(cmd)
+    state = None
+    final_state = None
+    for line in output.split('\n'):
+        key, value = line.strip().split(':')
+        if key.strip().lower() == 'state':
+            state = value.strip().upper()
+        if key.strip().lower() == 'final-state':
+            final_state = value.strip().upper()
+        if state and final_state:
+            if state not in valid_states:
+                raise ValueError("Unrecognized application state '{}'".format(state))
+            if final_state not in valid_states:
+                raise ValueError("Unrecognized application final state '{}'".format(final_state))
+            return state, final_state
+    raise RuntimeError("Unable to get status of application {}".format(app_id))
+
 
 def _start_flink_yarn_session(n_nodes):
+    """
+    :return: yarn application id of the session
+    """
     cmd = [ _get_exec('yarn-session.sh'),
              '-n',  n_nodes,
              '-jm', GlobalConf['job_manager_mem'], # job manager memory
              '-tm', GlobalConf['task_manager_mem'], # task manager memory
              '-s',  GlobalConf['slots'],
+             '-d', # run in detached mode
           ]
+    logger.info("Starting flink session on Yarn in detached mode")
+    logger.info("Configuration:\n\tnodes: %d\n\tjm mem: %d\n\ttm mem: %d\n\tslots: %d",
+            n_nodes, GlobalConf['job_manager_mem'], GlobalConf['task_manager_mem'], GlobalConf['slots'])
     logger.debug("executing command: %s", cmd)
-    p_session = subprocess.Popen(map(str, cmd), bufsize=4096)
-    logger.info("Waiting a bit while yarn-session starts up")
-    time.sleep(10)
-    p_session.poll()
-    if p_session.returncode is not None:
+    try:
+        output = subprocess.check_output(map(str, cmd))
+    except subprocess.CalledProcessError:
         logger.error("Failed to start Flink session on Yarn!")
-        logger.error("return code: %s", p_session.returncode)
-        raise RuntimeError("Failed to start Flink session on Yarn (ret code: {})"
-                .format(p_session.returncode))
+        raise
 
-    return p_session
+    logger.debug(
+            "Session output\n============================================================\n"
+            "%s\n============================================================", output)
+    app_id = _parse_session_output(output)
+    logger.info("Flink session started with application id '%s'", app_id)
+    state, final_state = _get_app_status(app_id)
 
-def _run_converter(input_dir, output_dir, n_nodes, jar_path):
+    while state != 'RUNNING' and final_state == 'UNDEFINED':
+        logger.debug("Waiting for session to enter the RUNNING state (currently in %s)", state)
+        time.sleep(2)
+        state, final_state = _get_app_status(app_id)
+
+    if final_state != 'UNDEFINED':
+        raise RuntimeError("Problem!! Flink session {} has terminated!  Final state: {}".format(app_id, final_state))
+
+    logger.info("Flink session %s RUNNING", app_id)
+
+    if GlobalConf.get('session_wait', 0) > 0:
+        logger.info("Waiting for %d seconds to flink session to start TaskManagers",
+                GlobalConf['session_wait'])
+        time.sleep(GlobalConf['session_wait'])
+        logger.debug("Wait finished.")
+
+    return app_id
+
+def _run_converter_wo_yarn_session(input_dir, output_dir, n_nodes, jar_path):
+    # setup properties file
+    run_dir = tempfile.mkdtemp(prefix="bclconverter_run_dir")
+    try:
+        ## start by preparing the properties file (at the moment the program
+        # doesn't accept command line arguments
+        tmp_conf_dir = os.path.join(run_dir, "conf")
+        os.makedirs(tmp_conf_dir)
+        props_file = os.path.join(tmp_conf_dir, GlobalConf['props_filename'])
+        with open(props_file, 'w') as f:
+            f.write("root = {}/\n".format(input_dir.rstrip('/')))
+            f.write("fout = {}/\n".format(output_dir.rstrip('/')))
+            f.write("numTasks = {:d}\n".format(GlobalConf['tasksPerNode'] * n_nodes))
+            f.write("flinkpar = {:d}\n".format(GlobalConf['flinkpar']))
+            f.write("jnum = {:d}\n".format(GlobalConf['jnum']))
+
+        logger.info("Wrote properties in file %s", props_file)
+        if logger.isEnabledFor(logging.DEBUG):
+            with open(props_file) as f:
+                logger.debug("\n=============================\n%s\n=====================\n", f.read())
+
+        # now run the program
+        logger.debug("Running flink cwd %s", run_dir)
+        cmd = [ _get_exec("flink"), "run",
+                "-c", "bclconverter.bclreader.test", # class name
+                jar_path ]
+        logger.debug("executing command: %s", cmd)
+        with chdir(run_dir):
+            logger.debug("Now running flink")
+            subprocess.check_call(map(str, cmd), cwd=run_dir)
+    finally:
+        logger.debug("Removing run directory %s", run_dir)
+        try:
+            shutil.rmtree(run_dir)
+        except IOError as e:
+            logger.debug("Error cleaning up temporary dir %s", run_dir)
+            logger.debug(e.message)
+
+
+def _run_converter_and_yarn_session(input_dir, output_dir, n_nodes, jar_path):
     # setup properties file
     run_dir = tempfile.mkdtemp(prefix="bclconverter_run_dir")
     try:
@@ -249,14 +351,35 @@ def _kill_flink_yarn_session(popen_yarn):
     for app in app_ids:
         subprocess.check_call("yarn application -kill " + app, shell=True)
 
+def _tear_down_flink_session(app_id):
+    if not app_id:
+        raise ValueError("_tear_down_flink_session: empty app id!")
+
+    cmd = [ 'yarn', 'application', '-kill', app_id ]
+    logger.info("Killing flink session with app id '%s'", app_id)
+    logger.debug("Command: %s", cmd)
+    subprocess.check_call(cmd)
+    # clean up temporary yarn session files, if any
+    path = ".flink/" + app_id
+    if phdfs.path.exists(path):
+        logger.info("Also removing the session's temporary files in %s", path)
+        phdfs.rmr(path)
 
 def run_bcl_converter(input_dir, output_dir, n_nodes, jar_path):
     if n_nodes < 1:
         raise ValueError("n_nodes must be >= 1 (got {})".format(n_nodes))
 
-    logger.info("Running flink bcl converter")
-    _run_converter(input_dir, output_dir, n_nodes, jar_path)
-
+    logger.info("Starting flink session on Yarn")
+    app_id = _start_flink_yarn_session(n_nodes)
+    try:
+        logger.info("Running flink bcl converter")
+        _run_converter_wo_yarn_session(input_dir, output_dir, n_nodes, jar_path)
+    finally:
+        try:
+            _tear_down_flink_session(app_id)
+        except StandardError as e:
+            logger.error("Problem tearing down flink session")
+            logger.exception(e)
 
 def _get_samples_from_bcl_output(output_dir):
     def name_filter(n):
