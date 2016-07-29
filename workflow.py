@@ -462,7 +462,7 @@ def main(args):
             try:
                 phdfs.rmr(tmp_output_dir)
             except StandardError as e:
-                logger.error("Error while trying to remove temporary output directory {}".format(e))
+                logger.error("Error while trying to remove temporary output directory %s", tmp_output_dir)
                 logger.exception(e)
 
     finish_time = time.time()
