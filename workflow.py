@@ -21,8 +21,10 @@ logger = setup_logging()
 
 GlobalConf = {
         'job_manager_mem'  : 10000,
-        'task_manager_mem' : 160000,
-        'slots'            : 16,
+        #'task_manager_mem' : 160000,
+        #'slots'            : 16,
+        'task_manager_mem' : 80000,
+        'slots'            : 8,
         'props_filename'   : 'bclconverter.properties',
         'flinkpar'         : 1,
         'jnum'             : 2,
@@ -199,7 +201,7 @@ def _start_flink_yarn_session(n_nodes):
     :return: yarn application id of the session
     """
     cmd = [ _get_exec('yarn-session.sh'),
-             '-n',  n_nodes,
+             '-n',  n_nodes * 2,
              '-jm', GlobalConf['job_manager_mem'], # job manager memory
              '-tm', GlobalConf['task_manager_mem'], # task manager memory
              '-s',  GlobalConf['slots'],
