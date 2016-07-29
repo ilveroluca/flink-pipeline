@@ -28,7 +28,7 @@ GlobalConf = {
         'jnum'             : 2,
         'tasksPerNode'     : 16,
         'session_wait'     : 45,
-        'seqal_nthreads'   : 15,
+        'seqal_nthreads'   : 14,
         'reference_archive': 'hs37d5.fasta.tar',
         'seqal_input_fmt'  : 'prq',
         'seqal_output_fmt' : 'sam',
