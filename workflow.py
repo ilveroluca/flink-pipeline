@@ -15,9 +15,9 @@ from contextlib import contextmanager
 
 import pydoop.hdfs as phdfs
 
-logformat = '%(asctime)s\t%(levelname)s\tWORKFLOW\t%(message)s'
-logging.basicConfig(format=logformat)
-logger = logging.getLogger()
+from util import mk_hdfs_temp_dir, setup_logging
+
+logger = setup_logging()
 
 GlobalConf = {
         'job_manager_mem'  : 10000,
@@ -129,15 +129,6 @@ def verify_conf(parser):
     # test whether we can find the executables  we need to run
     for e in ('yarn-session.sh', 'flink', 'seal'):
         _get_exec(e)
-
-def mk_temp_dir():
-    found = True
-    while found:
-        tmp = os.path.basename(tempfile.mktemp(prefix='bcl_output_'))
-        found = phdfs.path.exists(tmp)
-    phdfs.mkdir(tmp)
-    return tmp
-
 
 
 class AlignJob(object):
@@ -455,7 +446,7 @@ def main(args):
     logger.info("bcl converter jar %s", options.jar_path)
     logger.info("Other conf:\n%s", GlobalConf)
 
-    tmp_output_dir = mk_temp_dir()
+    tmp_output_dir = mk_hdfs_temp_dir('bcl_output_')
     logger.debug("Temporary output directory on HDFS: %s", tmp_output_dir)
     try:
         run_bcl_converter(options.input, tmp_output_dir, options.n_nodes, options.jar_path)
