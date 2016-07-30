@@ -61,7 +61,7 @@ class HdfsWorkflow(object):
         cmd = [ self._program ] + [ str(arg) for arg in  self._args ]
         cmd.append(hdfs_output_dir)
         logger.debug("workflow command: %s", cmd)
-        wf_logfile = GlobalConf['workflow_logfile']
+        wf_logfile = os.path.abspath(GlobalConf['workflow_logfile'])
         logger.info("Executing worflow")
         logger.info("Writing workflow log to %s", wf_logfile)
 
@@ -72,7 +72,7 @@ class HdfsWorkflow(object):
             end_time = time.time()
             run_time = end_time - start_time
 
-            attempt_info = AttemptInfo(cmd, retcode, os.path.abspath(GlobalConf['workflow_logfile']), run_time)
+            attempt_info = AttemptInfo(cmd, retcode, wf_logfile, run_time)
 
             if retcode == 0:
                 logger.info("Workflow finished")
