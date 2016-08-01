@@ -30,7 +30,8 @@ GlobalConf = {
         'jnum'             : 2,
         'tasksPerNode'     : 16,
         'session_wait'     : 45,
-        'seqal_nthreads'   : 14,
+        'seqal_nthreads'   : 8,
+        'seqal_yarn_cores' : 2,
         'reference_archive': 'hs37d5.fasta.tar',
         'seqal_input_fmt'  : 'prq',
         'seqal_output_fmt' : 'sam',
@@ -463,7 +464,7 @@ def run_alignments(bcl_output_dir, output_dir):
     base_cmd = [
             _get_exec('seal'), 'seqal', '--align-only',
             '-D', 'seal.seqal.nthreads={:d}'.format(GlobalConf['seqal_nthreads']),
-            '-D', 'mapreduce.map.cpu.vcores={:d}'.format(GlobalConf['seqal_nthreads']),
+            '-D', 'mapreduce.map.cpu.vcores={:d}'.format(GlobalConf['seqal_yarn_cores']),
             '--input-format', GlobalConf.get('seqal_input_fmt', 'prq'),
             '--output-format', GlobalConf.get('seqal_output_fmt', 'sam'),
             '--ref-archive', GlobalConf['reference_archive'],
