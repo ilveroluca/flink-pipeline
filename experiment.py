@@ -292,8 +292,7 @@ def parse_args(args):
 
 def main(args):
     logger.setLevel(logging.DEBUG)
-    p = make_parser()
-    options = p.parse_args(args)
+    options = parse_args(args)
 
     logger.debug("Creating Experiment")
     logger.debug("Results dir: %s", os.path.abspath(options.results_dir))
