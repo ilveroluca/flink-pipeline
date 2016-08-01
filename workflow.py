@@ -135,7 +135,7 @@ def verify_conf(parser):
         parser.error("session_wait, if present, must be >= 0 (found {})".format(GlobalConf['session_wait']))
 
     # test whether we can find the executables  we need to run
-    for e in ('yarn-session.sh', 'flink', 'seal', 'yarn'):
+    for e in ('yarn-session.sh', 'flink', 'seal', 'yarn', 'hdfs'):
         _get_exec(e)
 
 
@@ -425,10 +425,30 @@ def _try_remove_hdfs_dir(path):
         logger.exception(e)
     return False
 
+def _yarn_get_app_ids():
+    yarn_exec = _get_exec('yarn')
+    yarn_output = subprocess.check_output([ yarn_exec, 'application', '-list' ])
+    app_ids = [ line.split('\t', 1)[0] for line in yarn_output.split('\n')[2:] ]
+    return app_ids
+
+def _yarn_kill_all_apps():
+    error = False
+    yarn_exec = _get_exec('yarn')
+    for app_id in _yarn_get_app_ids():
+        cmd = [ yarn_exec, 'application', '-kill', app_id ]
+        logger.debug("killing application %s: %s", app_id, cmd)
+        retcode = subprocess.call(cmd)
+        if retcode != 0:
+            logger.info("Failed to kill yarn application %s", app_id)
+            error = True
+    if error:
+        raise RuntimeError("Failed to kill some running yarn applications")
+
 def _wait(jobs, remove_output):
     logger.info("Waiting for jobs to finish")
     running = list(jobs)
-    n = 0
+    secs = 0
+    poll_freq = 2
     failed = False
     while running and not failed:
         failed = any( (j.failed for j in running ) )
@@ -445,24 +465,19 @@ def _wait(jobs, remove_output):
             else:
                 new_running.append(j)
         running = new_running
-        if n % 8 == 0:
+        if secs % 8 == 0:
             logger.info("%d jobs (out of %d) haven't finished", len(running), len(jobs))
-            n = 1
+        if secs % 60 == 0:
+            logger.debug("Logging free disk space situation")
+            subprocess.call([_get_exec('hdfs'), 'dfsadmin', '-report'])
         if running:
-            time.sleep(2)
+            time.sleep(poll_freq)
+            secs += poll_freq
     if failed:
         logger.error("We have failed jobs :-(")
         logger.error("Killing  all remaining jobs on Yarn cluster")
         try:
-            yarn_exec = _get_exec('yarn')
-            yarn_output = subprocess.check_output([ yarn_exec, 'application', '-list' ])
-            app_ids = [ line.split('\t', 1)[0] for line in yarn_output.split('\n')[2:] ]
-            for app_id in app_ids:
-                cmd = [ yarn_exec, 'application', '-kill', app_id ]
-                logger.debug("killing application %s: %s", app_id, cmd)
-                retcode = subprocess.call(cmd)
-                if retcode != 0:
-                    logger.info("Failed to kill yarn application %s", app_id)
+            _yarn_kill_all_apps()
         except StandardError as e:
             logger.error("Failed to clean up yarn cluster.  Sorry!")
             logger.exception(e)
