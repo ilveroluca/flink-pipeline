@@ -375,6 +375,21 @@ def _tear_down_flink_session(app_id):
         logger.info("Also removing the session's temporary files in %s", path)
         phdfs.rmr(path)
 
+def _clean_up_bcl_output(output_dir):
+    """
+    Delete prq files with no data
+    """
+    fs = phdfs.hdfs()
+    count = 0
+    for item in fs.walk(output_dir):
+        if item['kind'] == 'file' and item['name'].endswith('.gz') and item['size'] < 30:
+            if not item['name'].startswith('hdfs://flinkmaster:9000/user/admin'):
+                raise RuntimeError("Insanity!  Tring to delete %s!", item['name'])
+            fs.delete(item['name'], recursive=False)
+            count += 1
+    logger.info("Removed %d empty files from bcl output", count)
+
+
 def run_bcl_converter(input_dir, output_dir, n_nodes, jar_path):
     if n_nodes < 1:
         raise ValueError("n_nodes must be >= 1 (got {})".format(n_nodes))
@@ -384,6 +399,7 @@ def run_bcl_converter(input_dir, output_dir, n_nodes, jar_path):
     try:
         logger.info("Running flink bcl converter")
         _run_converter_wo_yarn_session(input_dir, output_dir, n_nodes, jar_path)
+        _clean_up_bcl_output(output_dir)
     finally:
         try:
             _tear_down_flink_session(app_id)
