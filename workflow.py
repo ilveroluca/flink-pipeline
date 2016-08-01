@@ -383,7 +383,7 @@ def _clean_up_bcl_output(output_dir):
     count = 0
     for item in fs.walk(output_dir):
         if item['kind'] == 'file' and item['name'].endswith('.gz') and item['size'] < 30:
-            if not item['name'].startswith('hdfs://flinkmaster:9000/user/admin'):
+            if not item['name'].startswith('hdfs://'):
                 raise RuntimeError("Insanity!  Tring to delete %s!", item['name'])
             fs.delete(item['name'], recursive=False)
             count += 1
