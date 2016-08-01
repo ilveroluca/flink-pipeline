@@ -34,6 +34,7 @@ GlobalConf = {
         'reference_archive': 'hs37d5.fasta.tar',
         'seqal_input_fmt'  : 'prq',
         'seqal_output_fmt' : 'sam',
+        'remove_output'    : True, # remove output data as jobs finish, to save space
         }
 
 
@@ -60,6 +61,7 @@ def make_parser():
     parser.add_argument('--n-nodes', type=int, help="number of nodes in the cluster", default=1)
     parser.add_argument('--converter-path', help="bclconverter directory", default='.')
     parser.add_argument('--keep-intermediate', help="Don't delete intermediate data", action='store_true')
+    parser.add_argument('--skip-bcl', action='store_true', help="Skip bcl conversion step")
     parser.add_argument('--log-level', choices=('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'),
             help="Logging level", default='INFO')
     return parser
@@ -73,6 +75,9 @@ def parse_args(args):
 
     if phdfs.path.exists(options.output):
         p.error("Output path {} already exists".format(options.output))
+
+    if options.keep_intermediate and options.skip_bcl:
+        p.error("--keep-intermediate and --skip-bcl are incompatible")
 
     # check bcl converter path
     if not options.converter_path:
@@ -129,7 +134,7 @@ def verify_conf(parser):
         parser.error("session_wait, if present, must be >= 0 (found {})".format(GlobalConf['session_wait']))
 
     # test whether we can find the executables  we need to run
-    for e in ('yarn-session.sh', 'flink', 'seal'):
+    for e in ('yarn-session.sh', 'flink', 'seal', 'yarn'):
         _get_exec(e)
 
 
@@ -156,11 +161,19 @@ class AlignJob(object):
         return self._retcode is not None
 
     @property
+    def failed(self):
+        return self.done and self._retcode != 0
+
+    @property
     def retcode(self):
         if self.done:
             return self._retcode
         else:
             return None
+
+    @property
+    def output_path(self):
+        return self._output_path
 
 def _parse_session_output(text):
     regex = re.compile(r'\s*yarn application -kill (application_\d+_\d+)\s*')
@@ -386,21 +399,60 @@ def _get_samples_from_bcl_output(output_dir):
             d['name'] for d in phdfs.lsl(output_dir)
             if d['kind'] == 'directory' and name_filter(d['name']) ]
 
-def _wait(jobs):
+def _try_remove_hdfs_dir(path):
+    try:
+        phdfs.rmr(path)
+        return True
+    except StandardError as e:
+        logger.error("Error while trying to remove directory %s", path)
+        logger.exception(e)
+    return False
+
+def _wait(jobs, remove_output):
     logger.info("Waiting for jobs to finish")
     running = list(jobs)
     n = 0
-    while running:
-        running = [ j for j in running if not j.done ]
+    failed = False
+    while running and not failed:
+        failed = any( (j.failed for j in running ) )
+        if failed:
+            break
+        # update running list
+        new_running = []
+        for j in running:
+            if j.done: # job just finished
+                logger.info("Alignment job writing to %s just finished", phdfs.path.basename(j.output_path))
+                if remove_output:
+                    logger.info("Removing output path %s", j.output_path)
+                    _try_remove_hdfs_dir(j.output_path)
+            else:
+                new_running.append(j)
+        running = new_running
         if n % 8 == 0:
             logger.info("%d jobs (out of %d) haven't finished", len(running), len(jobs))
             n = 1
         if running:
             time.sleep(2)
-    logger.info("All jobs finished")
-    # no need to return anything.  The AlignJob objects passed in through the
-    # `jobs` list contain the return code
+    if failed:
+        logger.error("We have failed jobs :-(")
+        logger.error("Killing  all remaining jobs on Yarn cluster")
+        try:
+            yarn_exec = _get_exec('yarn')
+            yarn_output = subprocess.check_output([ yarn_exec, 'application', '-list' ])
+            app_ids = [ line.split('\t', 1)[0] for line in yarn_output.split('\n')[2:] ]
+            for app_id in app_ids:
+                cmd = [ yarn_exec, 'application', '-kill', app_id ]
+                logger.debug("killing application %s: %s", app_id, cmd)
+                retcode = subprocess.call(cmd)
+                if retcode != 0:
+                    logger.info("Failed to kill yarn application %s", app_id)
+        except StandardError as e:
+            logger.error("Failed to clean up yarn cluster.  Sorry!")
+            logger.exception(e)
+    else:
+        logger.info("All jobs finished")
 
+    return not failed
 
 def run_alignments(bcl_output_dir, output_dir):
     sample_directories = _get_samples_from_bcl_output(bcl_output_dir)
@@ -419,6 +471,7 @@ def run_alignments(bcl_output_dir, output_dir):
     def start_job(sample_dir):
         sample_output_dir = phdfs.path.join(output_dir, os.path.basename(sample_dir))
         cmd = base_cmd + [ sample_dir, sample_output_dir ]
+        # LP: should refactor to start the job within the AlignJob object
         job = AlignJob(cmd=cmd, inputp=sample_dir, outputp=sample_output_dir)
         logger.info("Launching alignment of sample %s", os.path.basename(sample_dir))
         logger.debug("executing command: %s", cmd)
@@ -428,11 +481,11 @@ def run_alignments(bcl_output_dir, output_dir):
         return job
 
     jobs = [ start_job(s) for s in sample_directories ]
-    _wait(jobs)
-    errored_jobs = [ j for j in jobs if j.retcode != 0 ]
-    if errored_jobs:
+    ok = _wait(jobs, GlobalConf['remove_output'])
+    if not ok:
+        errored_jobs = [ j for j in jobs if j.failed ]
         logger.error("%d alignment jobs failed", len(errored_jobs))
-        logger.error("Here are the return codes: %s", ', '.join([ str(j.retcode) for j in errored_jobs]))
+        logger.error("Here are the return codes: %s", ', '.join([ str(j.retcode) for j in errored_jobs ]))
         raise RuntimeError("Some alignment jobs failed")
 
 
@@ -448,17 +501,21 @@ def main(args):
     logger.info("bcl converter jar %s", options.jar_path)
     logger.info("Other conf:\n%s", GlobalConf)
 
-    tmp_output_dir = mk_hdfs_temp_dir('bcl_output_')
-    logger.debug("Temporary output directory on HDFS: %s", tmp_output_dir)
     try:
-        run_bcl_converter(options.input, tmp_output_dir, options.n_nodes, options.jar_path)
+        if options.skip_bcl:
+            logger.info("Skipping bcl conversion as requested")
+            tmp_output_dir = options.input
+        else:
+            tmp_output_dir = mk_hdfs_temp_dir('bcl_output_')
+            logger.debug("Temporary output directory on HDFS: %s", tmp_output_dir)
+            run_bcl_converter(options.input, tmp_output_dir, options.n_nodes, options.jar_path)
         time_after_bcl = time.time()
         run_alignments(tmp_output_dir, options.output)
         time_after_align = time.time()
     finally:
         if options.keep_intermediate:
             logger.info("Leaving intermediate data in directory %s", tmp_output_dir)
-        else:
+        elif not options.skip_bcl: # if we skipped bcl, tmp_conf_dir is the input directory
             try:
                 phdfs.rmr(tmp_output_dir)
             except StandardError as e:
