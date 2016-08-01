@@ -533,25 +533,26 @@ def main(args):
     logger.info("bcl converter jar %s", options.jar_path)
     logger.info("Other conf:\n%s", GlobalConf)
 
-    if options.skip_bcl:
-        logger.info("Skipping bcl conversion as requested")
-        tmp_output_dir = options.input
-    else:
-        tmp_output_dir = mk_hdfs_temp_dir('bcl_output_')
-        logger.debug("Temporary output directory on HDFS: %s", tmp_output_dir)
-        run_bcl_converter(options.input, tmp_output_dir, options.n_nodes, options.jar_path)
-    time_after_bcl = time.time()
-    run_alignments(tmp_output_dir, options.output)
-    time_after_align = time.time()
-    # clean-up, in case of successful completion
-    if options.keep_intermediate:
-        logger.info("Leaving intermediate data in directory %s", tmp_output_dir)
-    elif not options.skip_bcl: # if we skipped bcl, tmp_conf_dir is the input directory
-        try:
-            phdfs.rmr(tmp_output_dir)
-        except StandardError as e:
-            logger.error("Error while trying to remove temporary output directory %s", tmp_output_dir)
-            logger.exception(e)
+    try:
+        if options.skip_bcl:
+            logger.info("Skipping bcl conversion as requested")
+            tmp_output_dir = options.input
+        else:
+            tmp_output_dir = mk_hdfs_temp_dir('bcl_output_')
+            logger.debug("Temporary output directory on HDFS: %s", tmp_output_dir)
+            run_bcl_converter(options.input, tmp_output_dir, options.n_nodes, options.jar_path)
+        time_after_bcl = time.time()
+        run_alignments(tmp_output_dir, options.output)
+        time_after_align = time.time()
+    finally:
+        if options.keep_intermediate:
+            logger.info("Leaving intermediate data in directory %s", tmp_output_dir)
+        elif not options.skip_bcl: # if we skipped bcl, tmp_conf_dir is the input directory
+            try:
+                phdfs.rmr(tmp_output_dir)
+            except StandardError as e:
+                logger.error("Error while trying to remove temporary output directory %s", tmp_output_dir)
+                logger.exception(e)
 
     finish_time = time.time()
     logger.info("Seconds for bcl conversion:  %0.2f", (time_after_bcl - start_time))
