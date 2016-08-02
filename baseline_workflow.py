@@ -18,7 +18,7 @@ logger = setup_logging()
 
 GlobalConf = {
         'bwa_nthreads'     : 31,
-        'reference_path'   : '/data/data01/hs37d5/hs37d5.fasta',
+        'reference_prefix' : '/data/data01/hs37d5/hs37d5.fasta',
         'tmp_space'        : '/data/data02/',
         }
 
@@ -29,6 +29,7 @@ def make_parser():
     parser.add_argument('--converter-path', help="Path to Illumina's bcl2fastq executable.  If not set we look for it in the PATH")
     parser.add_argument('--bwa-path', help="Path to bwa executable.  If not set we look for it in the PATH")
     parser.add_argument('--keep-intermediate', help="Don't delete intermediate data", action='store_true')
+    parser.add_argument('--skip-bcl', action='store_true', help="Skip bcl conversion step")
     parser.add_argument('--log-level', choices=('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'),
             help="Logging level", default='INFO')
     return parser
@@ -54,6 +55,9 @@ def parse_args(args):
     else:
         options.bwa_path = get_exec('bwa')
 
+    if options.keep_intermediate and options.skip_bcl:
+        p.error("--keep-intermediate and --skip-bcl are incompatible")
+
     try:
         log_level = getattr(logging, options.log_level)
         options.log_level = log_level # overwrite the existing value
@@ -73,8 +77,6 @@ def verify_conf(parser):
     if not parts:
         parser.error("Reference {} doesn't seem to exist".format(ref))
 
-    if GlobalConf['bcl_nthreads'] <= 0:
-        parser.error("Value of bcl_nthreads configuration must be > 0 (found {})".format(GlobalConf['bcl_nthreads']))
     if GlobalConf['bwa_nthreads'] <= 0:
         parser.error("Value of bwa_nthreads configuration must be > 0 (found {})".format(GlobalConf['bwa_nthreads']))
 
@@ -88,7 +90,7 @@ def run_bcl_converter(input_dir, output_dir, exec_path):
     logger.debug("executing command: %s", cmd)
     subprocess.check_call(map(str, cmd))
 
-def _get_samples_from_bcl_output(output_dir):
+def _get_samples_from_bcl_output(bcl_output_dir):
     """
     Returns a dictionary 'sample name' -> ( [read1 files], [read2 files])
     """
@@ -96,16 +98,20 @@ def _get_samples_from_bcl_output(output_dir):
         bn = os.path.basename(n).lower()
         return bn.endswith('.fastq.gz') and not bn.startswith('undetermined')
 
-    i_files = ( os.path.abspath(f) for f in os.listdir(output_dir) if name_filter(f) and os.path.isfile(f))
+    all_files = [ os.path.join(bcl_output_dir, f) for f in os.listdir(bcl_output_dir)
+            if name_filter(f) and os.path.isfile(os.path.join(bcl_output_dir, f)) ]
+
+    logger.debug("Scanned bcl output directory %s.  Found %d files", bcl_output_dir, len(all_files))
+    logger.debug("First file: %s", all_files[0])
 
     samples = defaultdict(lambda : (list(), list()))
-    for fname in i_files:
+    for fname in all_files:
         # filenames look like this: DNA16-0084-R0001_S13_L003_R2_001.fastq.gz
-        parts = fname.split('_')
+        parts = os.path.basename(fname).split('_')
         if parts[3] == 'R1':
-            read = 1
+            read = 0
         elif parts[3] == 'R2':
-            read = 2
+            read = 1
         else:
             raise ValueError("Unrecognized read number {} in filename {}".format(parts[3], fname))
         samples[parts[0]][read].append(fname)
@@ -128,15 +134,17 @@ def _wait(jobs):
     # `jobs` list contain the return code
 
 def _run_bwa(sample_file_lists, ref, output, bwa_path, nthreads):
-    r1_files, r2_files = sample_file_lists
-    logger.debug("r1 files: %s", r1_files)
-    logger.debug("r2 files", r2_files)
+    r1_files = sorted(sample_file_lists[0])
+    r2_files = sorted(sample_file_lists[1])
 
-    cmd = "{} -t {:d} -T 0 {} <(gunzip -c {}) <(gunzip -c {}) > {}".format(
+    logger.debug("r1 files: %s", r1_files)
+    logger.debug("r2 files: %s", r2_files)
+
+    cmd = "{} mem -t {:d} -T 0 {} <(gunzip -c {}) <(gunzip -c {}) > {}".format(
             bwa_path, nthreads, ref, ' '.join(r1_files), ' '.join(r2_files), output)
 
     logger.debug("Executing cmd: %s", cmd)
-    subprocess.check_call([cmd], shell=True)
+    subprocess.check_call(cmd, shell=True, executable='/bin/bash')
 
 
 def run_alignments(bcl_output_dir, output_dir, reference, bwa_path, nthreads):
@@ -168,19 +176,23 @@ def main(args):
     logger.info("Options:\n%s", options)
     logger.info("Other conf:\n%s", GlobalConf)
 
-    bcl_output_dir = tempfile.mkdtemp(prefix="bcl_output_", dir=GlobalConf.get('tmp_space'))
-    logger.debug("Output directory for bcl conversion: %s", bcl_output_dir)
     start_time = time.time()
     try:
-        run_bcl_converter(options.input, bcl_output_dir, options.converter_path)
+        if options.skip_bcl:
+            bcl_output_dir = options.input
+            logger.info("Skipping bcl conversion.  Reading from %s", bcl_output_dir)
+        else:
+            bcl_output_dir = tempfile.mkdtemp(prefix="bcl_output_", dir=GlobalConf.get('tmp_space'))
+            logger.debug("Created temp directory for bcl conversion: %s", bcl_output_dir)
+            run_bcl_converter(options.input, bcl_output_dir, options.converter_path)
         time_after_bcl = time.time()
         run_alignments(bcl_output_dir, options.output,
-                GlobalConf['reference_path'], options.bwa_path, GlobalConf['bwa_nthreads'])
+                GlobalConf['reference_prefix'], options.bwa_path, GlobalConf['bwa_nthreads'])
         time_after_align = time.time()
     finally:
         if options.keep_intermediate:
             logger.info("Leaving intermediate data in directory %s", bcl_output_dir)
-        else:
+        elif not options.skip_bcl: # if we skipped bcl, tmp_conf_dir is the input directory
             try:
                 shutil.rmtree(bcl_output_dir)
             except StandardError as e:
