@@ -510,7 +510,6 @@ def run_alignments(bcl_output_dir, output_dir):
 
 
 def main(args):
-    start_time = time.time()
     logger.setLevel(logging.DEBUG)
 
     options = parse_args(args)
@@ -521,6 +520,7 @@ def main(args):
     logger.info("bcl converter jar %s", options.jar_path)
     logger.info("Other conf:\n%s", GlobalConf)
 
+    start_time = time.time()
     try:
         if options.skip_bcl:
             logger.info("Skipping bcl conversion as requested")
