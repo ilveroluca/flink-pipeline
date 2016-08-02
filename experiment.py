@@ -19,13 +19,15 @@ GlobalConf = {
     }
 
 class HdfsWorkflow(object):
-    def __init__(self, path_to_exec):
+    def __init__(self, path_to_exec, n_nodes):
+        if n_nodes < 1:
+            raise ValueError("n_nodes must be > 0 (got {})".format(n_nodes))
         self._program = path_to_exec
         self._args = [
-            '--n-nodes', 1,
+            '--n-nodes', n_nodes,
             '--converter-path', '/home/admin/code/bclconverter/',
             '--log-level', 'DEBUG',
-            'illumina.small',
+            'illumina',
         ]
 
     def _get_part_times_from_log(self, logfile):
@@ -276,6 +278,7 @@ def make_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('program', help="The program to execute")
     parser.add_argument('results_dir', help="Where the results and logs will be written. The basename will be used as a prefix")
+    parser.add_argument('--n-nodes', type=int, help="Number of nodes on which the experiment will run")
     parser.add_argument('--max-retries', type=int, default=3,
             help="Max retries in case workflow execution fails")
     parser.add_argument('--num-repeats', type=int, default=3,
@@ -291,6 +294,8 @@ def parse_args(args):
     if not os.access(options.program, os.R_OK | os.X_OK):
         raise ValueError("Specified program {} is not an executable".format(options.program))
 
+    if options.n_nodes < 1:
+        p.error("--n-nodes must be >= 1")
     if options.max_retries < 1:
         p.error("--max-retries must be >= 1")
     if options.max_retries < 1:
@@ -307,7 +312,7 @@ def main(args):
     logger.debug("Creating Experiment")
     logger.debug("Results dir: %s", os.path.abspath(options.results_dir))
     logger.debug("Num repeats: %d; max retries: %d", options.num_repeats, options.max_retries)
-    exp = Experiment(HdfsWorkflow(options.program), os.path.abspath(options.results_dir), options.num_repeats)
+    exp = Experiment(HdfsWorkflow(options.program, options.n_nodes), os.path.abspath(options.results_dir), options.num_repeats)
     exp.max_retries = options.max_retries
 
     logger.info("Starting experiment")
