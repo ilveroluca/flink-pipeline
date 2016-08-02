@@ -390,6 +390,11 @@ def _clean_up_bcl_output(output_dir):
             count += 1
     logger.info("Removed %d empty files from bcl output", count)
 
+    undet_path = os.path.join(output_dir, 'Undetermined')
+    if phdfs.path.exists(undet_path):
+        logger.info("Removing reads from Undetermined dataset %s", undet_path)
+        fs.delete(undet_path)
+
 
 def run_bcl_converter(input_dir, output_dir, n_nodes, jar_path):
     if n_nodes < 1:
