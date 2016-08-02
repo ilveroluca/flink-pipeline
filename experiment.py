@@ -9,11 +9,12 @@ import subprocess
 import sys
 import tempfile
 import time
-import util
+
+from util import chdir, get_exec, setup_logging, yarn_get_node_list
 
 import pydoop.hdfs as phdfs
 
-logger = util.setup_logging()
+logger = setup_logging()
 
 GlobalConf = {
     'sleep_between_runs': 60,
@@ -135,13 +136,13 @@ class HdfsWorkflow(object):
 
     def _clear_caches(self):
         logger.info("Clearing system caches on cluster")
-        nodes = util.yarn_get_node_list()
+        nodes = yarn_get_node_list()
         hostnames = set([ n.split(':')[0].strip() for n in nodes ])
         logger.debug("Found %d yarn nodemanager hosts", len(hostnames))
 
         clean_cmd = "sudo sh -c 'echo 3 >/proc/sys/vm/drop_caches'"
         logger.debug("Using pdsh")
-        pdsh_cmd = [ util.get_exec('pdsh'),
+        pdsh_cmd = [ get_exec('pdsh'),
                      '-R', 'ssh',
                      '-w', ','.join(hostnames),
                      clean_cmd ]
@@ -313,7 +314,7 @@ class Experiment(object):
         logger.debug("Making run directory %s for repetition %s / attempt %s", run_dir, rep_num, retry_num)
         os.makedirs(run_dir)
 
-        with util.chdir(run_dir):
+        with chdir(run_dir):
             logger.info("Starting attempt")
             attempt_info = self._workflow.execute()
         attempt_info.repeat_num = rep_num

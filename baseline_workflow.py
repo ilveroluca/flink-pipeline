@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 
-from . import util
 
 import argparse
 import glob
@@ -13,7 +12,9 @@ import time
 import tempfile
 from collections import defaultdict
 
-logger = util.setup_logging()
+from util import setup_logging, get_exec
+
+logger = setup_logging()
 
 GlobalConf = {
         'bwa_nthreads'     : 31,
@@ -43,7 +44,7 @@ def parse_args(args):
         if not os.access(options.converter_path, os.X_OK | os.R_OK):
             p.error("Specified converter is not executable")
     else:
-        options.converter_path = util.get_exec('bcl2fastq')
+        options.converter_path = get_exec('bcl2fastq')
 
     if options.bwa_path:
         if not os.path.exists(options.bwa_path):
@@ -51,7 +52,7 @@ def parse_args(args):
         if not os.access(options.bwa_path, os.X_OK | os.R_OK):
             p.error("Specified bwa is not executable")
     else:
-        options.bwa_path = util.get_exec('bwa')
+        options.bwa_path = get_exec('bwa')
 
     try:
         log_level = getattr(logging, options.log_level)
