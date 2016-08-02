@@ -61,7 +61,7 @@ class BaseWorkflow(object):
         raise RuntimeError("Failed to get bcl times and alignment times from workflow log")
 
     def execute(self):
-        wf_output_dir = tempfile.mkdtemp(prefix="wf_output_", dir=GlobalConf['local_tmp_space'])
+        wf_output_dir = os.path.join(GlobalConf['local_tmp_space'], "workflow_output_{}".format(time.time()))
         cmd = [ self._program ]
         cmd.extend( ( str(arg) for arg in  self._args ) )
         cmd.append(self._input_dir)
@@ -71,7 +71,6 @@ class BaseWorkflow(object):
         logger.info("Executing worflow")
         logger.info("Writing workflow log to %s", wf_logfile)
 
-        logger.debug("clearing system caches")
         self._clear_caches()
 
         try:
@@ -361,6 +360,7 @@ class Experiment(object):
 def make_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('program', help="The program to execute")
+    parser.add_argument('input', help="Input dataset")
     parser.add_argument('results_dir', help="Where the results and logs will be written. The basename will be used as a prefix")
     parser.add_argument('type', choices=('yarn', 'base'), help="Whether to run yarn-based or baseline")
     parser.add_argument('--n-nodes', type=int, help="Number of nodes on which the experiment will run")
@@ -379,7 +379,7 @@ def parse_args(args):
     if not os.access(options.program, os.R_OK | os.X_OK):
         raise ValueError("Specified program {} is not an executable".format(options.program))
 
-    if options.n_nodes < 1:
+    if options.type == 'yarn' and options.n_nodes < 1:
         p.error("--n-nodes must be >= 1")
     if options.max_retries < 1:
         p.error("--max-retries must be >= 1")
