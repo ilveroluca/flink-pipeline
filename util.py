@@ -1,6 +1,7 @@
 
 import logging
 import os
+import subprocess
 import tempfile
 from contextlib import contextmanager
 
@@ -24,13 +25,12 @@ def chdir(new_dir):
     finally:
         os.chdir(current_dir)
 
-def _get_exec(name):
+def get_exec(name):
     for dirname in os.getenv('PATH').split(os.pathsep):
         e = os.path.join(dirname, name)
         if os.path.exists(e) and os.access(e, os.X_OK | os.R_OK):
             return e
     raise ValueError("Couldn't find executable {} in the PATH".format(name))
-
 
 def mk_hdfs_temp_dir(prefix):
     found = True
@@ -40,4 +40,8 @@ def mk_hdfs_temp_dir(prefix):
     phdfs.mkdir(tmp)
     return tmp
 
+def yarn_get_node_list():
+    output = subprocess.check_output([get_exec('yarn'), 'node', '-list', '-all'])
+    nodes = [ line.split('\t', 1) for line in output.split('\n')[2:] ]
+    return nodes
 

@@ -7,11 +7,11 @@ import re
 import subprocess
 import sys
 import time
+import util
 
 import pydoop.hdfs as phdfs
 
-from util import chdir, setup_logging
-logger = setup_logging()
+logger = util.setup_logging()
 
 GlobalConf = {
     'sleep_between_runs': 60,
@@ -49,6 +49,21 @@ class HdfsWorkflow(object):
                     return bcl_time, align_time
         raise RuntimeError("Failed to get bcl times and alignment times from workflow log")
 
+    def _clear_caches(self):
+        logger.info("Clearing system caches on cluster")
+        nodes = util.yarn_get_node_list()
+        hostnames = set([ n.split(':')[0].strip() for n in nodes ])
+        logger.debug("Found %d yarn nodemanager hosts", len(hostnames))
+
+        clean_cmd = "sudo sh -c 'echo 3 >/proc/sys/vm/drop_caches'"
+        logger.debug("Using pdsh")
+        pdsh_cmd = [ util.get_exec('pdsh'),
+                     '-R', 'ssh',
+                     '-w', ','.join(hostnames),
+                     clean_cmd ]
+
+        logger.debug("cmd: %s", pdsh_cmd)
+        subprocess.check_call(pdsh_cmd)
 
     def execute(self):
         """
@@ -64,6 +79,8 @@ class HdfsWorkflow(object):
         wf_logfile = os.path.abspath(GlobalConf['workflow_logfile'])
         logger.info("Executing worflow")
         logger.info("Writing workflow log to %s", wf_logfile)
+
+        self._clear_caches()
 
         try:
             with open(wf_logfile, 'a') as f:
@@ -211,19 +228,12 @@ class Experiment(object):
         logger.debug("Making run directory %s for repetition %s / attempt %s", run_dir, rep_num, retry_num)
         os.makedirs(run_dir)
 
-        with chdir(run_dir):
-            logger.info("Clearing system caches")
-            self._clear_caches()
+        with util.chdir(run_dir):
             logger.info("Starting attempt")
             attempt_info = self._workflow.execute()
         attempt_info.repeat_num = rep_num
         attempt_info.attempt_num = retry_num
         return attempt_info
-
-    def _clear_caches(self):
-        cmd = "sudo sh -c 'echo 3 >/proc/sys/vm/drop_caches'"
-        logger.debug("cmd: %s", cmd)
-        subprocess.check_call(cmd, shell=True)
 
     def _record_attempt(self, attempt_info):
         self._attempts.append(attempt_info)

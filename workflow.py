@@ -11,11 +11,10 @@ import subprocess
 import sys
 import time
 import tempfile
-from contextlib import contextmanager
 
 import pydoop.hdfs as phdfs
 
-from util import mk_hdfs_temp_dir, setup_logging
+from util import chdir, get_exec, mk_hdfs_temp_dir, setup_logging
 
 logger = setup_logging()
 
@@ -37,23 +36,6 @@ GlobalConf = {
         'seqal_output_fmt' : 'sam',
         'remove_output'    : True, # remove output data as jobs finish, to save space
         }
-
-
-@contextmanager
-def chdir(new_dir):
-    current_dir = os.getcwd()
-    try:
-        os.chdir(new_dir)
-        yield
-    finally:
-        os.chdir(current_dir)
-
-def _get_exec(name):
-    for dirname in os.getenv('PATH').split(os.pathsep):
-        e = os.path.join(dirname, name)
-        if os.path.exists(e) and os.access(e, os.X_OK | os.R_OK):
-            return e
-    raise ValueError("Couldn't find executable {} in the PATH".format(name))
 
 def make_parser():
     parser = argparse.ArgumentParser()
@@ -136,7 +118,7 @@ def verify_conf(parser):
 
     # test whether we can find the executables  we need to run
     for e in ('yarn-session.sh', 'flink', 'seal', 'yarn', 'hdfs'):
-        _get_exec(e)
+        get_exec(e)
 
 
 class AlignJob(object):
@@ -214,7 +196,7 @@ def _start_flink_yarn_session(n_nodes):
     """
     :return: yarn application id of the session
     """
-    cmd = [ _get_exec('yarn-session.sh'),
+    cmd = [ get_exec('yarn-session.sh'),
              '-n',  n_nodes * 2,
              '-jm', GlobalConf['job_manager_mem'], # job manager memory
              '-tm', GlobalConf['task_manager_mem'], # task manager memory
@@ -279,7 +261,7 @@ def _run_converter_wo_yarn_session(input_dir, output_dir, n_nodes, jar_path):
 
         # now run the program
         logger.debug("Running flink cwd %s", run_dir)
-        cmd = [ _get_exec("flink"), "run",
+        cmd = [ get_exec("flink"), "run",
                 "-c", "bclconverter.bclreader.test", # class name
                 jar_path ]
         logger.debug("executing command: %s", cmd)
@@ -317,7 +299,7 @@ def _run_converter_and_yarn_session(input_dir, output_dir, n_nodes, jar_path):
                 logger.debug("\n=============================\n%s\n=====================\n", f.read())
         # now run the program
         logger.debug("Running flink cwd %s", run_dir)
-        cmd = [ _get_exec("flink"), "run",
+        cmd = [ get_exec("flink"), "run",
                 "-m", "yarn-cluster",
                  '-yn',  n_nodes,
                  '-yjm', GlobalConf['job_manager_mem'], # job manager memory
@@ -432,14 +414,14 @@ def _try_remove_hdfs_dir(path):
     return False
 
 def _yarn_get_app_ids():
-    yarn_exec = _get_exec('yarn')
+    yarn_exec = get_exec('yarn')
     yarn_output = subprocess.check_output([ yarn_exec, 'application', '-list' ])
     app_ids = [ line.split('\t', 1)[0] for line in yarn_output.split('\n')[2:] ]
     return app_ids
 
 def _yarn_kill_all_apps():
     error = False
-    yarn_exec = _get_exec('yarn')
+    yarn_exec = get_exec('yarn')
     for app_id in _yarn_get_app_ids():
         cmd = [ yarn_exec, 'application', '-kill', app_id ]
         logger.debug("killing application %s: %s", app_id, cmd)
@@ -475,7 +457,7 @@ def _wait(jobs, remove_output):
             logger.info("%d jobs (out of %d) haven't finished", len(running), len(jobs))
         if secs % 60 == 0:
             logger.debug("Logging free disk space situation")
-            subprocess.call([_get_exec('hdfs'), 'dfsadmin', '-report'])
+            subprocess.call([get_exec('hdfs'), 'dfsadmin', '-report'])
         if running:
             time.sleep(poll_freq)
             secs += poll_freq
@@ -499,7 +481,7 @@ def run_alignments(bcl_output_dir, output_dir):
     phdfs.mkdir(output_dir)
     # launch all the jobs
     base_cmd = [
-            _get_exec('seal'), 'seqal', '--align-only',
+            get_exec('seal'), 'seqal', '--align-only',
             '-D', 'seal.seqal.nthreads={:d}'.format(GlobalConf['seqal_nthreads']),
             '-D', 'mapreduce.map.cpu.vcores={:d}'.format(GlobalConf['seqal_yarn_cores']),
             '--input-format', GlobalConf.get('seqal_input_fmt', 'prq'),
