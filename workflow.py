@@ -416,7 +416,7 @@ def run_bcl_converter(input_dir, output_dir, n_nodes, jar_path):
 def _get_samples_from_bcl_output(output_dir):
     def name_filter(n):
         bn = os.path.basename(n).lower()
-        return not (bn.startswith('_') or 'unknown' in bn)
+        return not (bn.startswith('_') or ('unknown' in bn) or ('undetermined' in bn) )
 
     return [
             d['name'] for d in phdfs.lsl(output_dir)
