@@ -4,8 +4,10 @@ import argparse
 import logging
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import util
 
@@ -16,18 +18,98 @@ logger = util.setup_logging()
 GlobalConf = {
     'sleep_between_runs': 60,
     'workflow_logfile'  : 'workflow.log',
+    'bwa_path'          : '/home/admin/code/rapi/bwa-auto-build/bwa',
+    'bcl2fastq_path'    : '/home/admin/code/bcl2fastq',
+    'local_tmp_space'   : '/data/data02/'
     }
 
+class BaseWorkflow(object):
+    def __init__(self, program, input_dir):
+        self._program = program
+        self._input_dir = input_dir
+        self._args = [
+            '--converter-path', GlobalConf['bcl2fastq_path'],
+            '--bwa-path', GlobalConf['bwa_path'],
+            '--log-level', 'DEBUG',
+            ]
+
+    def _clear_caches(self):
+        logger.info("Clearing system caches")
+        clean_cmd = "sudo sh -c 'echo 3 >/proc/sys/vm/drop_caches'"
+        subprocess.check_call(clean_cmd, shell=True)
+
+    def _get_part_times_from_log(self, logfile):
+        bcl_regex = re.compile(r'.*Seconds for bcl conversion:\s*(\d+\.\d+).*')
+        align_regex = re.compile(r'.*Seconds for alignment:\s*(\d+\.\d+).*')
+        bcl_time = None
+        align_time = None
+
+        with open(logfile) as f:
+            BLOCK_SIZE = 1024
+            f.seek(-BLOCK_SIZE, 2) # we assume these lines will be in last BLOCK_SIZE bytes
+            for line in f:
+                m = bcl_regex.match(line)
+                if m:
+                    bcl_time = float(m.group(1))
+                else:
+                    m = align_regex.match(line)
+                    if m:
+                        align_time = float(m.group(1))
+                if bcl_time is not None and align_time is not None:
+                    return bcl_time, align_time
+        raise RuntimeError("Failed to get bcl times and alignment times from workflow log")
+
+    def execute(self):
+        wf_output_dir = tempfile.mkdtemp(prefix="wf_output_", dir=GlobalConf['local_tmp_space'])
+        cmd = [ self._program ]
+        cmd.extend( ( str(arg) for arg in  self._args ) )
+        cmd.append(self._input_dir)
+        cmd.append(wf_output_dir)
+        logger.debug("workflow command: %s", cmd)
+        wf_logfile = os.path.abspath(GlobalConf['workflow_logfile'])
+        logger.info("Executing worflow")
+        logger.info("Writing workflow log to %s", wf_logfile)
+
+        logger.debug("clearing system caches")
+        self._clear_caches()
+
+        try:
+            with open(wf_logfile, 'a') as f:
+                start_time = time.time()
+                retcode = subprocess.call(cmd, stdout=f, stderr=subprocess.STDOUT)
+            end_time = time.time()
+            run_time = end_time - start_time
+
+            attempt_info = AttemptInfo(cmd, retcode, wf_logfile, run_time)
+
+            if retcode == 0:
+                logger.info("Workflow finished in %0.2f seconds", run_time)
+                bcl, align = self._get_part_times_from_log(wf_logfile)
+                attempt_info.bcl_secs = bcl
+                attempt_info.align_secs = align
+            else:
+                logger.info("Workflow FAILED with exit code %s", retcode)
+            return attempt_info
+        finally:
+            try:
+                if os.path.exists(wf_output_dir):
+                    logger.debug("Removing workflow's temporary output directory %s", wf_output_dir)
+                    shutil.rmtree(wf_output_dir)
+            except StandardError as e:
+                logger.error("Failed to clean up workflow's output directory  %s", wf_output_dir)
+                logger.exception(e)
+
+
 class HdfsWorkflow(object):
-    def __init__(self, path_to_exec, n_nodes):
+    def __init__(self, path_to_exec, n_nodes, input_dir):
         if n_nodes < 1:
             raise ValueError("n_nodes must be > 0 (got {})".format(n_nodes))
         self._program = path_to_exec
+        self._input_dir = input_dir
         self._args = [
             '--n-nodes', n_nodes,
             '--converter-path', '/home/admin/code/bclconverter/',
             '--log-level', 'DEBUG',
-            'illumina',
         ]
 
     def _get_part_times_from_log(self, logfile):
@@ -76,6 +158,7 @@ class HdfsWorkflow(object):
         logger.debug("CWD: %s", os.getcwd())
         logger.debug("workflow output directory: %s", hdfs_output_dir)
         cmd = [ self._program ] + [ str(arg) for arg in  self._args ]
+        cmd.append(self._input_dir)
         cmd.append(hdfs_output_dir)
         logger.debug("workflow command: %s", cmd)
         wf_logfile = os.path.abspath(GlobalConf['workflow_logfile'])
@@ -278,6 +361,7 @@ def make_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('program', help="The program to execute")
     parser.add_argument('results_dir', help="Where the results and logs will be written. The basename will be used as a prefix")
+    parser.add_argument('type', choices=('yarn', 'base'), help="Whether to run yarn-based or baseline")
     parser.add_argument('--n-nodes', type=int, help="Number of nodes on which the experiment will run")
     parser.add_argument('--max-retries', type=int, default=3,
             help="Max retries in case workflow execution fails")
@@ -312,7 +396,15 @@ def main(args):
     logger.debug("Creating Experiment")
     logger.debug("Results dir: %s", os.path.abspath(options.results_dir))
     logger.debug("Num repeats: %d; max retries: %d", options.num_repeats, options.max_retries)
-    exp = Experiment(HdfsWorkflow(options.program, options.n_nodes), os.path.abspath(options.results_dir), options.num_repeats)
+
+    if options.type == 'yarn':
+        wf = HdfsWorkflow(options.program, options.n_nodes, options.input)
+    elif options.type == 'base':
+        wf = BaseWorkflow(options.program, options.input)
+    else:
+        raise ValueError("Invalid workflow type {}".format(options.type))
+
+    exp = Experiment(wf, os.path.abspath(options.results_dir), options.num_repeats)
     exp.max_retries = options.max_retries
 
     logger.info("Starting experiment")
