@@ -379,7 +379,8 @@ def _clean_up_bcl_output(output_dir):
     """
     Delete prq files with no data
     """
-    fs = phdfs.hdfs()
+    host, port, _ = phdfs.path.split(output_dir)
+    fs = phdfs.hdfs(host, port)
     count = 0
     for item in fs.walk(output_dir):
         if item['kind'] == 'file' and item['name'].endswith('.gz') and item['size'] < 30:
