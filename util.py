@@ -42,6 +42,7 @@ def mk_hdfs_temp_dir(prefix):
 
 def yarn_get_node_list():
     output = subprocess.check_output([get_exec('yarn'), 'node', '-list', '-all'])
-    nodes = [ line.split('\t', 1) for line in output.split('\n')[2:] ]
+    lines = output.split('\n')[2:]
+    nodes = [ line.split('\t', 1)[0] for line in lines if line ]
     return nodes
 
