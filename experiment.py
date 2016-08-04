@@ -169,6 +169,7 @@ class HdfsWorkflow(object):
 
         try:
             with open(wf_logfile, 'a') as f:
+                logger.info("Starting workflow")
                 start_time = time.time()
                 retcode = subprocess.call(cmd, stdout=f, stderr=subprocess.STDOUT)
             end_time = time.time()

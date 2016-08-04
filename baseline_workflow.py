@@ -19,7 +19,7 @@ logger = setup_logging()
 GlobalConf = {
         'bwa_nthreads'     : 31,
         'reference_prefix' : '/data/data01/hs37d5/hs37d5.fasta',
-        'tmp_space'        : '/data/data02/',
+        'tmp_space'        : '/data/data01/',
         }
 
 def make_parser():
